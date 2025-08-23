@@ -1,10 +1,9 @@
 import struct
 
 class Alumno:
-    FORMAT = "is5s11s20s15sif"  # Sin el campo real en el formato
+    FORMAT = "i5s11s20sif"  
     RECORD_SIZE = struct.calcsize(FORMAT)
     def __init__(self, codigo:int, nombre:str, apellidos: str, carrera: str, ciclo: int, mensualidad:float):
-        self.real = 0  # Se asignará cuando se agregue al archivo
         self.codigo = codigo
         self.nombre = nombre
         self.apellidos = apellidos
@@ -14,7 +13,16 @@ class Alumno:
         self.next_del = 0
 
     def pack(self):
-        data = struct.pack(self.FORMAT, self.codigo, self.nombre.encode('utf-8'), self.apellidos.encode('utf-8'), self.carrera.encode('utf-8'), self.ciclo, self.mensualidad)
+        if isinstance(self.nombre, bytes):
+            nombre = self.nombre
+            apellidos = self.apellidos
+            carrera = self.carrera
+        else:
+            nombre = self.nombre.encode('utf-8')[:5].ljust(5, b'\x00')  # 5 bytes
+            apellidos = self.apellidos.encode('utf-8')[:11].ljust(11, b'\x00')  # 11 bytes
+            carrera = self.carrera.encode('utf-8')[:20].ljust(20, b'\x00')  # 20 bytes
+        
+        data = struct.pack(self.FORMAT, self.codigo, nombre, apellidos, carrera, self.ciclo, self.mensualidad)
         return data
 
     @staticmethod
@@ -24,12 +32,16 @@ class Alumno:
         return alumno
 
     def __str__(self):
-        return f"Alumno(codigo={self.codigo}, nombre={self.nombre}, apellidos={self.apellidos}, carrera={self.carrera}, ciclo={self.ciclo}, mensualidad={self.mensualidad})"
+        nombre = self.nombre.decode('utf-8').rstrip('\x00') if isinstance(self.nombre, bytes) else self.nombre
+        apellidos = self.apellidos.decode('utf-8').rstrip('\x00') if isinstance(self.apellidos, bytes) else self.apellidos
+        carrera = self.carrera.decode('utf-8').rstrip('\x00') if isinstance(self.carrera, bytes) else self.carrera
+        
+        return f"Alumno( codigo={self.codigo}, nombre={nombre}, apellidos={apellidos}, carrera={carrera}, ciclo={self.ciclo}, mensualidad={self.mensualidad})"
 
-class FixedRecordFile: #move the last
+class FixedRecordFile:
     def __init__(self, filename:str, real:int = 0):
         self.filename = filename
-        self.real = real  # Número de registros válidos en el archivo
+        self.real = real  
 
     def load(self):
         with open(self.filename, 'rb') as f:
@@ -51,23 +63,25 @@ class FixedRecordFile: #move the last
                 print(record)
                 pos += 1
                 
+    
 
 
     def addRecord(self, alumno: Alumno):
+        try:
+            with open(self.filename, 'r+b') as f:
+                pass
+        except FileNotFoundError:
+            with open(self.filename, 'wb') as f:
+                pass
+        
         with open(self.filename, 'r+b') as f:
-            # Asignar la posición real al alumno (siguiente posición disponible)
-            alumno.real = self.real
-            
-            # Ir directamente a la posición indicada por alumno.real
-            f.seek(alumno.real * Alumno.RECORD_SIZE)
+            f.seek(self.real * Alumno.RECORD_SIZE)
             f.write(alumno.pack())
             
-            # Incrementar el contador de registros reales
             self.real += 1
 
     def readRecord(self, pos: int):
         with open(self.filename, 'rb') as f:
-            #leer el registro en la posición especificada
             f.seek(pos * Alumno.RECORD_SIZE)
             data = f.read(Alumno.RECORD_SIZE)
             if not data:
@@ -80,67 +94,71 @@ class FixedRecordFile: #move the last
         return self.readRecord(real_pos)
 
     def remove(self, pos):
-        """Elimina un registro: mueve el último registro a la posición a eliminar y reduce self.real en 1"""
-        if pos > self.real or pos < 0:
+        if pos >= self.real or pos < 0:
             print(f"Posición {pos} fuera de rango (real = {self.real})")
             return False
             
         with open(self.filename, 'r+b') as f:
-            # Si no es el último registro, mover el último registro a la posición a eliminar
-            if pos <= self.real - 1:
-                # Leer el último registro (posición self.real - 1)
+            if pos < self.real - 1:
                 f.seek((self.real - 1) * Alumno.RECORD_SIZE)
                 last_record_data = f.read(Alumno.RECORD_SIZE)
                 
-                # Desempaquetar el último registro y actualizar su valor real
-                last_record = Alumno.unpack(last_record_data)
-                last_record.real = pos  # Actualizar su posición real
-                
-                # Escribir el último registro en la posición a eliminar
                 f.seek(pos * Alumno.RECORD_SIZE)
-                f.write(last_record.pack())
+                f.write(last_record_data)
             
-            # Reducir el contador de registros reales en 1
             self.real -= 1
             
-            # Truncar el archivo para que coincida con self.real
-            new_size = self.real * Alumno.RECORD_SIZE
-            f.truncate(new_size)
+
+
             return True
             
 
 def main():
-    # Crear una instancia del archivo de registros fijos
-    archivo = FixedRecordFile("alumnos.dat", 0)  # Empezamos con 0 registros
+
+    archivo = FixedRecordFile("alumnos.dat", 0)  
     
     # Crear algunos alumnos
     alumno1 = Alumno(12345, "Juan", "Pérez", "Ing", 5, 1500.0)
     alumno2 = Alumno(67890, "María", "López", "Med", 3, 2000.0)
     alumno3 = Alumno(11111, "Carlos", "Ruiz", "Der", 7, 1800.0)
-    
-    # Agregar registros
-    print("=== Agregando registros ===")
+    alumno4 = Alumno(22222, "Ana", "García", "Bio", 4, 1700.0)
+
+    # agregamos 
+    print("=== Agregando 4 registros ===")
     archivo.addRecord(alumno1)
-    print(f"Alumno1 guardado en posición real: {alumno1.real}, archivo.real = {archivo.real}")
-    
     archivo.addRecord(alumno2) 
-    print(f"Alumno2 guardado en posición real: {alumno2.real}, archivo.real = {archivo.real}")
-    
     archivo.addRecord(alumno3)
-    print(f"Alumno3 guardado en posición real: {alumno3.real}, archivo.real = {archivo.real}")
+    archivo.addRecord(alumno4)
+    print(f"Total registros agregados: archivo.real = {archivo.real}")
     
-    # Mostrar todos los registros
-    print("\n=== Mostrando todos los registros ===")
-    archivo.load()
+    # mostramos todos antes de eliminar
+    print("\n=== ANTES DE ELIMINAR - load2() (registros válidos) ===")
+    archivo.load2()
     
-    # Eliminar un registro (posición 1)
-    print(f"\n=== Eliminando registro en posición 1 (archivo.real = {archivo.real}) ===")
+    # eliminamos
+    print("\n=== Eliminando registro en posición 1 (María) ===")
     archivo.remove(1)
     print(f"Después de eliminar: archivo.real = {archivo.real}")
     
-    # Mostrar registros después de la eliminación
-    print("\n=== Registros después de eliminar ===")
+    print("\n=== Eliminando registro en posición 2 (Ana, que ahora está en pos 2) ===")
+    archivo.remove(2)
+    print(f"Después de eliminar: archivo.real = {archivo.real}")
+    
+    # VEMOS LA DIRENCIA ENTRE BASURA Y LOS CORRECTOS 
+    print("\n" + "="*60)
+    print("DIFERENCIA ENTRE load() Y load2() DESPUÉS DE ELIMINAR:")
+    print("="*60)
+    
+    print(f"\n=== load() - Lee TODO el archivo (puede mostrar basura) ===")
     archivo.load()
+    
+    print(f"\n=== load2() - Solo lee {archivo.real} registros válidos ===")
+    archivo.load2()
+    
+    print(f"\n=== RESUMEN ===")
+    print(f"archivo.real = {archivo.real} (registros válidos)")
+    print("load() mostró registros + posible basura")
+    print("load2() mostró solo los registros válidos")
 
 if __name__ == "__main__":
     main()
