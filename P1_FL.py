@@ -1,12 +1,11 @@
 import struct
 import os
-# Free list
 
 class Alumno:
-    FORMAT = "i5s11s20s15sifi"
-
+    FORMAT = "i20s30s20sifi"
     RECORD_SIZE = struct.calcsize(FORMAT)
-    def __init__(self, codigo:int, nombre:str, apellidos: str, carrera: str, ciclo: int, mensualidad:float):
+
+    def __init__(self, codigo:int, nombre:str, apellidos:str, carrera:str, ciclo:int, mensualidad:float):
         self.codigo = codigo
         self.nombre = nombre
         self.apellidos = apellidos
@@ -14,6 +13,7 @@ class Alumno:
         self.ciclo = ciclo
         self.mensualidad = mensualidad
         self.next_del = 0
+        self.pos = None   # siempre existe
 
     def pack(self):
         return struct.pack(
@@ -26,7 +26,6 @@ class Alumno:
             self.mensualidad,
             self.next_del
         )
-
 
     @staticmethod
     def unpack(data):
@@ -42,9 +41,9 @@ class Alumno:
         alumno.next_del = next_del
         return alumno
 
-
     def __str__(self):
-        return f"Alumno(codigo={self.codigo}, nombre={self.nombre}, apellidos={self.apellidos}, carrera={self.carrera}, ciclo={self.ciclo}, mensualidad={self.mensualidad})"
+        return f"Alumno(codigo={self.codigo}, nombre={self.nombre}, apellidos={self.apellidos}, carrera={self.carrera}, ciclo={self.ciclo}, mensualidad={self.mensualidad}, next_del={self.next_del})"
+
 
 class FixedRecordFile:
     def __init__(self, filename:str):
@@ -53,13 +52,14 @@ class FixedRecordFile:
     
     def load(self):
         with open(self.filename, 'rb') as f:
+            idx = 0
             while True:
                 data = f.read(Alumno.RECORD_SIZE)
                 if not data:
                     break
                 record = Alumno.unpack(data)
-                print(record)
-        
+                print(f"[{idx}] {record}")
+                idx += 1
 
     def addRecord(self, alumno: Alumno):
         with open(self.filename, 'r+b' if os.path.exists(self.filename) else 'w+b') as f:
@@ -68,7 +68,6 @@ class FixedRecordFile:
                 f.seek(0, 2)
                 pos = f.tell() // Alumno.RECORD_SIZE
                 f.write(alumno.pack())
-                alumno.pos = pos
             else:
                 # Reuse deleted slot
                 f.seek(self.pos_del * Alumno.RECORD_SIZE)
@@ -76,10 +75,11 @@ class FixedRecordFile:
                 old = Alumno.unpack(data)
                 next_pos = old.next_del
                 pos = self.pos_del
-                f.seek(self.pos_del * Alumno.RECORD_SIZE)
+                f.seek(pos * Alumno.RECORD_SIZE)
                 f.write(alumno.pack())
                 self.pos_del = next_pos
-
+        alumno.pos = pos
+        return pos
 
     def readRecord(self, pos: int):
         with open(self.filename, 'rb') as f:
@@ -87,8 +87,7 @@ class FixedRecordFile:
             data = f.read(Alumno.RECORD_SIZE)
             if not data:
                 return None
-            record = Alumno.unpack(data)
-            return record
+            return Alumno.unpack(data)
 
     def remove(self, pos:int):
         with open(self.filename, 'r+b') as f:
@@ -104,41 +103,33 @@ class FixedRecordFile:
             return True
 
 
-# main
-# probar todas las funciones
-# ejecutar programa para escribir
-# ejecutar programa para leer
-
 def main():
-    # Crear una instancia del archivo de registros fijos
-    archivo = FixedRecordFile("alumnos.dat")  # Empezamos con 0 registros
+    archivo = FixedRecordFile("alumnos.dat")
     
-    # Crear algunos alumnos
     alumno1 = Alumno(12345, "Juan", "Pérez", "Ing", 5, 1500.0)
     alumno2 = Alumno(67890, "María", "López", "Med", 3, 2000.0)
     alumno3 = Alumno(11111, "Carlos", "Ruiz", "Der", 7, 1800.0)
     
-    # Agregar registros
     print("=== Agregando registros ===")
+    print(f"Agregado {alumno1.codigo} en posición: {archivo.addRecord(alumno1)}")
+    print(f"Agregado {alumno2.codigo} en posición: {archivo.addRecord(alumno2)}")
+    print(f"Agregado {alumno3.codigo} en posición: {archivo.addRecord(alumno3)}")
 
-    archivo.addRecord(alumno1)
-    print(f"Agregado: {alumno1.pos}")
-    archivo.addRecord(alumno2)
-    print(f"Agregado: {alumno2.pos}")
-    archivo.addRecord(alumno3)
-    print(f"Agregado: {alumno3.pos}")
-
-    # Mostrar todos los registros
     print("\n=== Mostrando todos los registros ===")
     archivo.load()
     
-    # Eliminar un registro (posición 1)
-    print(f"\n=== Eliminando registro en posición 1 (archivo.pos = {archivo.pos}) ===")
+    print(f"\n=== Eliminando registro en posición 1 (pos_del actual = {archivo.pos_del}) ===")
     archivo.remove(1)
-    print(f"Después de eliminar: archivo.pos = {archivo.pos}")
+    print(f"Después de eliminar: pos_del actual = {archivo.pos_del}")
     
-    # Mostrar registros después de la eliminación
     print("\n=== Registros después de eliminar ===")
+    archivo.load()
+
+    alumno4 = Alumno(22222, "Ana", "Gómez", "Arqu", 2, 1700.0)
+    print(f"\n=== Agregando nuevo registro (debería reutilizar posición {archivo.pos_del}) ===")
+    print(f"Agregado {alumno4.codigo} en posición: {archivo.addRecord(alumno4)}")
+
+    print("\n=== Registros finales ===")
     archivo.load()
 
 if __name__ == "__main__":
