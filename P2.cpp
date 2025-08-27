@@ -118,8 +118,8 @@ Matricula RecordFile::readRecord(int pos) {
     ifstream ptrFile(filename, ios::binary);
     if (ptrFile.is_open()) {
         // Logic to read the record at position 'pos'
-        ptrFile.read(reinterpret_cast<char*>(&record), sizeof(Matricula));
-        ptrFile.seekg(pos);
+        ptrFile.seekg(pos*record.getsizeof(), ios::beg);
+        ptrFile.read((char*)(&record), record.getsizeof());
         // Read the record data here
         cout<<"Record read from position " << pos << endl;
         record.display(); // Placeholder
