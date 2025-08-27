@@ -1,7 +1,10 @@
 import struct
+import os
+# Free list
 
 class Alumno:
-    FORMAT = "s5s11s20s15sifi"
+    FORMAT = "i5s11s20s15sifi"
+
     RECORD_SIZE = struct.calcsize(FORMAT)
     def __init__(self, codigo:int, nombre:str, apellidos: str, carrera: str, ciclo: int, mensualidad:float):
         self.codigo = codigo
@@ -13,13 +16,32 @@ class Alumno:
         self.next_del = 0
 
     def pack(self):
-        data = struct.pack(self.FORMAT, self.codigo, self.nombre.encode('utf-8'), self.apellidos.encode('utf-8'), self.carrera.encode('utf-8'), self.ciclo, self.mensualidad, self.next_del)
-        return data
+        return struct.pack(
+            self.FORMAT,
+            self.codigo,
+            self.nombre.encode('utf-8').ljust(5, b'\x00'),
+            self.apellidos.encode('utf-8').ljust(11, b'\x00'),
+            self.carrera.encode('utf-8').ljust(20, b'\x00'),
+            self.ciclo,
+            self.mensualidad,
+            self.next_del
+        )
+
 
     @staticmethod
     def unpack(data):
-        alumno = Alumno(*struct.unpack(Alumno.FORMAT, data))
+        codigo, nombre, apellidos, carrera, ciclo, mensualidad, next_del = struct.unpack(Alumno.FORMAT, data)
+        alumno = Alumno(
+            codigo,
+            nombre.decode('utf-8').rstrip('\x00'),
+            apellidos.decode('utf-8').rstrip('\x00'),
+            carrera.decode('utf-8').rstrip('\x00'),
+            ciclo,
+            mensualidad
+        )
+        alumno.next_del = next_del
         return alumno
+
 
     def __str__(self):
         return f"Alumno(codigo={self.codigo}, nombre={self.nombre}, apellidos={self.apellidos}, carrera={self.carrera}, ciclo={self.ciclo}, mensualidad={self.mensualidad})"
@@ -40,13 +62,24 @@ class FixedRecordFile:
         
 
     def addRecord(self, alumno: Alumno):
-        with open(self.filename, 'ab') as f:
-            f.seek(0, 2)
-            while self.pos_del != -1:
-                self.pos_del = f.seek(self.pos_del * Alumno.RECORD_SIZE)
-                self.pos_del = f.read(Alumno.RECORD_SIZE - struct.calcsize('i'))
-                self.pos_del = struct.unpack('i', self.pos_del)[0]
-            f.write(alumno.pack())
+        with open(self.filename, 'r+b' if os.path.exists(self.filename) else 'w+b') as f:
+            if self.pos_del == -1:
+                # Append at end
+                f.seek(0, 2)
+                pos = f.tell() // Alumno.RECORD_SIZE
+                f.write(alumno.pack())
+                alumno.pos = pos
+            else:
+                # Reuse deleted slot
+                f.seek(self.pos_del * Alumno.RECORD_SIZE)
+                data = f.read(Alumno.RECORD_SIZE)
+                old = Alumno.unpack(data)
+                next_pos = old.next_del
+                pos = self.pos_del
+                f.seek(self.pos_del * Alumno.RECORD_SIZE)
+                f.write(alumno.pack())
+                self.pos_del = next_pos
+
 
     def readRecord(self, pos: int):
         with open(self.filename, 'rb') as f:
@@ -87,23 +120,22 @@ def main():
     
     # Agregar registros
     print("=== Agregando registros ===")
+
     archivo.addRecord(alumno1)
-    print(f"Alumno1 guardado en posición real: {alumno1.real}, archivo.real = {archivo.real}")
-    
-    archivo.addRecord(alumno2) 
-    print(f"Alumno2 guardado en posición real: {alumno2.real}, archivo.real = {archivo.real}")
-    
+    print(f"Agregado: {alumno1.pos}")
+    archivo.addRecord(alumno2)
+    print(f"Agregado: {alumno2.pos}")
     archivo.addRecord(alumno3)
-    print(f"Alumno3 guardado en posición real: {alumno3.real}, archivo.real = {archivo.real}")
-    
+    print(f"Agregado: {alumno3.pos}")
+
     # Mostrar todos los registros
     print("\n=== Mostrando todos los registros ===")
     archivo.load()
     
     # Eliminar un registro (posición 1)
-    print(f"\n=== Eliminando registro en posición 1 (archivo.real = {archivo.real}) ===")
+    print(f"\n=== Eliminando registro en posición 1 (archivo.pos = {archivo.pos}) ===")
     archivo.remove(1)
-    print(f"Después de eliminar: archivo.real = {archivo.real}")
+    print(f"Después de eliminar: archivo.pos = {archivo.pos}")
     
     # Mostrar registros después de la eliminación
     print("\n=== Registros después de eliminar ===")
