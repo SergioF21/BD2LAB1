@@ -51,26 +51,38 @@ public:
     }
 
     // Deserialización
-    static Matricula unpack(fstream &in) {
+    static Matricula unpack(fstream &in, int maxSize) {
         int len;
         string codigo, observaciones;
         int ciclo;
         float mensualidad;
 
+        streampos start = in.tellg();
+        streampos current;
+
         // codigo
         in.read((char*)&len, sizeof(int));
-        if (!in) return Matricula();
+        current = in.tellg();
+        if (!in || (current - start) > maxSize) return Matricula();
+        if (len <0 || (current - start +len) > maxSize) return Matricula(); 
         codigo.resize(len);
         in.read(&codigo[0], len);
 
         // ciclo
         in.read((char*)&ciclo, sizeof(int));
+        current = in.tellg();
+        if (!in || (current - start) > maxSize) return Matricula();
 
         // mensualidad
         in.read((char*)&mensualidad, sizeof(float));
+        current = in.tellg();
+        if (!in || (current - start) > maxSize) return Matricula();
 
         // observaciones
         in.read((char*)&len, sizeof(int));
+        current = in.tellg();
+        if (!in || (current - start) > maxSize) return Matricula();
+        if (len <0 || (current - start +len) > maxSize) return Matricula();
         observaciones.resize(len);
         in.read(&observaciones[0], len);
 
@@ -174,7 +186,7 @@ public:
 
         // Proteger contra basura si sobran bytes
         streampos start = in.tellg();
-        Matricula r = Matricula::unpack(in);
+        Matricula r = Matricula::unpack(in, entry.size);
         streampos end = in.tellg();
 
         if ((end-start)>entry.size){
@@ -201,7 +213,7 @@ public:
                 continue; 
             }
             in.seekg(e.offset, ios::beg);
-            Matricula r = Matricula::unpack(in);
+            Matricula r = Matricula::unpack(in, e.size);
             cout << "Registro lógico " << pos << ":" << endl;
             r.display();
             pos++;
