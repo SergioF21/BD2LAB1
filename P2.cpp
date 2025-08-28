@@ -213,9 +213,12 @@ public:
                 continue; 
             }
             in.seekg(e.offset, ios::beg);
+
             Matricula r = Matricula::unpack(in, e.size);
-            cout << "Registro lógico " << pos << ":" << endl;
-            r.display();
+            if(!r.codigo.empty()){
+                cout << "Registro lógico " << pos << ":" << endl;
+                r.display();
+            }
             pos++;
         }
         in.close();
@@ -338,12 +341,17 @@ int main() {
     cout << "Cabecera después de agregar otro registro:" << endl;
     showHeader();
 
-    cout << "Leyendo registro 1 (eliminado):" << endl;
+    cout << "Leyendo registro A002 (eliminado):" << endl;
     Matricula r_elim = recordFile.readRecord(1);
     if (r_elim.codigo.empty()) {
         cout << "Registro 1 está eliminado." << endl;
     } else {
-        r_elim.display();
+        if (r_elim.codigo == "A002")
+            cout << "Error: registro 1 no debería existir!" << endl;
+        else {
+            cout << "Registro nuevo encontrado" << endl;
+            r_elim.display();
+        }
     }
     
     checkHeaderIntegrity("matriculas.dat", "cabecera.dat");
