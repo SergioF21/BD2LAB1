@@ -87,6 +87,11 @@ struct HeaderEntry {
     bool valid; // si el registro está activo o eliminado
 };
 
+struct FreeEntry {
+    int offset;
+    int size;
+};
+
 /*
 Clase RecordFile
 Maneja:
@@ -98,60 +103,81 @@ class RecordFile {
 private:
     string filename;    // datos
     string headername;  // metadata (índices)
+    string freelistname;
 
 public:
-    RecordFile(string fname) : filename(fname), headername(headerfile) {}
+    RecordFile(string fname) : filename(fname), headername(headerfile), freelistname("libres.dat") {}
+
+    vector<FreeEntry> loadFreeList() {
+        ifstream f(freelistname, ios::binary);
+        vector<FreeEntry> freeList;
+        if (!f.is_open()) return freeList;
+        FreeEntry e;
+        while (f.read((char*)&e, sizeof(FreeEntry))) {
+            freeList.push_back(e);
+        }
+        return freeList; 
+    }
+
+    void saveFreeList(const vector<FreeEntry>& freeList) {
+        ofstream f(freelistname, ios::binary | ios::trunc);
+        for (const auto& e : freeList) {
+            f.write((char*)&e, sizeof(FreeEntry));
+        }
+    }
 
     // Agregar registro O(1)
     void add(Matricula record) {
         int newSize = record.getsizeof();
+        vector<FreeEntry> freeList = loadFreeList();
 
-        fstream fc(headerfile, ios::in | ios::out | ios::binary);
-        HeaderEntry entry;
-        int posIndex = 0;
-        bool reused = false;
-
-        if (fc.is_open()) {
-            
-            while (fc.read((char*)&entry, sizeof(HeaderEntry))) {
-                if (!entry.valid && entry.size >= newSize) {
-
-                    // Reutilizar espacio
-                    fstream out(datafile, ios::in | ios::out | ios::binary);
-                    out.seekp(entry.offset, ios::beg);
-                    record.pack(out);
-
-                    // Rellenar hueco sobrante si el nuevo es más pequeño
-                    int padding = entry.size - newSize;
-                    if (padding > 0) {
-                        string zeros(padding, '\0');
-                        out.write(zeros.c_str(), padding);
-                    }
-                    out.close();
-
-                    entry.valid = true;
-                    entry.size = newSize;
-                    fc.seekp(posIndex * sizeof(HeaderEntry), ios::beg);
-                    fc.write((char*)&entry, sizeof(HeaderEntry));
-                    reused = true;
-                    break;
-                }
-                posIndex++;
+        int idx = -1;
+        for (size_t i = 0; i < freeList.size(); i++) {
+            if (freeList[i].size >= newSize) {
+                idx = i;
+                break;  
             }
-            fc.close();
         }
 
-        if (!reused) {
-            fstream out(datafile, ios::app | ios::binary);
-            int offset = (int)out.tellp();
+        int offset;
+        if (idx != -1) {
+            // usar hueco
+            offset = freeList[idx].offset;
+            fstream out(filename, ios::in | ios::out | ios::binary);
+            out.seekp(offset, ios::beg);
+            record.pack(out);
+            out.close();
+
+            // actualizar lista libre
+            int leftover = freeList[idx].size - newSize;
+            if (leftover > 0) {
+                freeList[idx].offset += newSize;
+                freeList[idx].size = leftover;
+            } else {
+                freeList.erase(freeList.begin() + idx);
+            }
+            saveFreeList(freeList);
+            
+            // actualizar cabecera
+            HeaderEntry e{offset, newSize, true};
+            fstream fc(headername, ios::in | ios::out | ios::binary);
+            fc.write((char*)&e,sizeof(HeaderEntry));
+            fc.close();
+            cout<<"Registro agregado reutilizando hueco en offset "<<offset<<endl;
+        } else {
+            // append
+            fstream out(filename, ios::app | ios::binary);
+            offset = (int)out.tellp();
             record.pack(out);
             int size = (int)out.tellp() - offset;
             out.close();
 
             HeaderEntry newEntry{offset, size, true};
-            fstream fc2(headerfile, ios::app | ios::binary);
+            fstream fc2(headername, ios::app | ios::binary);
             fc2.write((char*)&newEntry, sizeof(HeaderEntry));
             fc2.close();
+
+            cout << "Registro agregado al final en offset " << offset << endl;
         }
     }
 
@@ -219,10 +245,21 @@ public:
         fc.read((char*)&entry, sizeof(HeaderEntry));
         if (!fc) return;
 
+        if (!entry.valid) {
+            cerr << "Registro ya eliminado en posición " << pos << endl;
+            return;
+        }
+
         entry.valid = false;
         fc.seekp(pos * sizeof(HeaderEntry), ios::beg);
         fc.write((char*)&entry, sizeof(HeaderEntry));
         fc.close();
+        
+        // añadir hueco a la lista libre
+        vector<FreeEntry> freeList = loadFreeList();
+        freeList.push_back(FreeEntry{entry.offset, entry.size});
+        saveFreeList(freeList);
+
         cout << "Registro en posición lógica " << pos << " marcado como eliminado." << endl;
     }
 };
